@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { ZoomIn, ZoomOut, MinusCircle, PlusCircle } from "lucide-react";
+import { PatternAssistant } from "./pattern-assistant";
 
 // Base cell size in pixels
 const BASE_CELL_SIZE = 15;
@@ -140,6 +141,10 @@ export default function GameOfLife() {
   const runningRef = useRef(running);
   const speedRef = useRef(speed);
 
+  // Drag state
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragValue, setDragValue] = useState<boolean | null>(null);
+
   // Scrolling and viewport
   const gridRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -154,6 +159,12 @@ export default function GameOfLife() {
   // Options
   const [showGrid, setShowGrid] = useState(true);
   const [wrapEdges, setWrapEdges] = useState(true);
+  const [trailEffect, setTrailEffect] = useState(true);
+  const [smoothScroll, setSmoothScroll] = useState(true);
+
+  // Animation frame ID for smooth scrolling
+  const scrollAnimationRef = useRef<number | undefined>(undefined);
+  const lastScrollTargetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Resize timeout ref for debouncing
   const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -379,28 +390,77 @@ export default function GameOfLife() {
     };
   }, [grid, dimensions]);
 
-  // Auto-scroll to keep active cells in view
+  // Enhanced auto-scroll with smooth animation
+  const smoothScrollTo = useCallback(
+    (targetX: number, targetY: number) => {
+      if (!containerRef.current || !smoothScroll) {
+        if (containerRef.current) {
+          containerRef.current.scrollLeft = targetX;
+          containerRef.current.scrollTop = targetY;
+        }
+        return;
+      }
+
+      const container = containerRef.current;
+      const startX = container.scrollLeft;
+      const startY = container.scrollTop;
+      const distanceX = targetX - startX;
+      const distanceY = targetY - startY;
+      const startTime = performance.now();
+      const duration = 500; // Animation duration in ms
+
+      // Cancel any existing animation
+      if (scrollAnimationRef.current) {
+        cancelAnimationFrame(scrollAnimationRef.current);
+      }
+
+      // Save target for potential interruption
+      lastScrollTargetRef.current = { x: targetX, y: targetY };
+
+      const animate = (currentTime: number) => {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+
+        // Ease out cubic function
+        const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+        const easeProgress = easeOut(progress);
+
+        container.scrollLeft = startX + distanceX * easeProgress;
+        container.scrollTop = startY + distanceY * easeProgress;
+
+        if (progress < 1) {
+          scrollAnimationRef.current = requestAnimationFrame(animate);
+        }
+      };
+
+      scrollAnimationRef.current = requestAnimationFrame(animate);
+    },
+    [smoothScroll]
+  );
+
+  // Update auto-scroll to use smooth scrolling
   const autoScrollGrid = useCallback(() => {
     if (!autoScroll || !gridRef.current || !containerRef.current) return;
 
     const activeRegion = findActiveRegion();
     if (!activeRegion) return;
 
-    // Calculate center position in pixels
     const centerX = activeRegion.centerCol * cellSize;
     const centerY = activeRegion.centerRow * cellSize;
-
-    // Calculate scroll position to center active region
     const containerWidth = containerRef.current.clientWidth;
     const containerHeight = containerRef.current.clientHeight;
 
-    // Smooth scroll to center the active region
-    containerRef.current.scrollTo({
-      left: centerX - containerWidth / 2,
-      top: centerY - containerHeight / 2,
-      behavior: "smooth",
-    });
-  }, [autoScroll, findActiveRegion, cellSize]);
+    smoothScrollTo(centerX - containerWidth / 2, centerY - containerHeight / 2);
+  }, [autoScroll, findActiveRegion, cellSize, smoothScrollTo]);
+
+  // Cleanup animation frame on unmount
+  useEffect(() => {
+    return () => {
+      if (scrollAnimationRef.current) {
+        cancelAnimationFrame(scrollAnimationRef.current);
+      }
+    };
+  }, []);
 
   // Run game of life simulation
   const runOneGeneration = useCallback(
@@ -480,11 +540,11 @@ export default function GameOfLife() {
     if (running) {
       setRunning(false);
       setTimeout(() => {
-        setGrid(runOneGeneration);
+        setGrid((g) => runOneGeneration(g));
         setGeneration((g) => g + 1);
       }, 10);
     } else {
-      setGrid(runOneGeneration);
+      setGrid((g) => runOneGeneration(g));
       setGeneration((g) => g + 1);
     }
   }, [running, runOneGeneration]);
@@ -550,18 +610,52 @@ export default function GameOfLife() {
 
   // Toggle cell state when clicked
   const toggleCell = useCallback(
-    (rowIndex: number, colIndex: number) => {
+    (rowIndex: number, colIndex: number, forceValue?: boolean) => {
       if (running) return; // Disable editing while simulation is running
 
       setGrid((grid) => {
         const newGrid = [...grid];
         newGrid[rowIndex] = [...newGrid[rowIndex]];
-        newGrid[rowIndex][colIndex] = !newGrid[rowIndex][colIndex];
+        newGrid[rowIndex][colIndex] =
+          forceValue !== undefined ? forceValue : !newGrid[rowIndex][colIndex];
         return newGrid;
       });
     },
     [running]
   );
+
+  // Handle mouse events for drag functionality
+  const handleMouseDown = useCallback(
+    (rowIndex: number, colIndex: number) => {
+      if (running) return;
+      setIsDragging(true);
+      const newValue = !grid[rowIndex][colIndex];
+      setDragValue(newValue);
+      toggleCell(rowIndex, colIndex);
+    },
+    [running, grid, toggleCell]
+  );
+
+  const handleMouseEnter = useCallback(
+    (rowIndex: number, colIndex: number) => {
+      if (!isDragging || dragValue === null || running) return;
+      toggleCell(rowIndex, colIndex, dragValue);
+    },
+    [isDragging, dragValue, running, toggleCell]
+  );
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+    setDragValue(null);
+  }, []);
+
+  // Add mouseup event listener to handle dragging outside the grid
+  useEffect(() => {
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [handleMouseUp]);
 
   // Handle wheel events for zooming
   const handleWheel = useCallback(
@@ -625,6 +719,21 @@ export default function GameOfLife() {
           </Button>
         </div>
 
+        {/* Pattern Assistant */}
+        <PatternAssistant
+          onPatternSelect={({ pattern, description }) => {
+            // Place the pattern in the center of the visible grid
+            const rowStart =
+              Math.floor(dimensions.rows / 2) - Math.floor(pattern.length / 2);
+            const colStart =
+              Math.floor(dimensions.cols / 2) -
+              Math.floor(pattern[0].length / 2);
+
+            placePattern(pattern, rowStart, colStart);
+            setGeneration(0);
+          }}
+        />
+
         {/* Game grid */}
         <div
           ref={containerRef}
@@ -646,7 +755,8 @@ export default function GameOfLife() {
               row.map((cell, colIndex) => (
                 <div
                   key={`${rowIndex}-${colIndex}`}
-                  onClick={() => toggleCell(rowIndex, colIndex)}
+                  onMouseDown={() => handleMouseDown(rowIndex, colIndex)}
+                  onMouseEnter={() => handleMouseEnter(rowIndex, colIndex)}
                   className={`
                     ${cell ? "bg-primary" : "bg-background"} 
                     ${
@@ -654,11 +764,19 @@ export default function GameOfLife() {
                         ? "border border-gray-200 dark:border-gray-800"
                         : ""
                     }
-                    transition-colors duration-100
+                    ${
+                      trailEffect
+                        ? "transition-all duration-200"
+                        : "transition-colors duration-100"
+                    }
+                    cursor-pointer
+                    select-none
+                    hover:opacity-80
                   `}
                   style={{
                     width: cellSize,
                     height: cellSize,
+                    transform: cell && trailEffect ? "scale(1.05)" : "scale(1)",
                   }}
                 />
               ))
@@ -763,6 +881,24 @@ export default function GameOfLife() {
           >
             Auto-Scroll
           </Toggle>
+
+          <Toggle
+            pressed={trailEffect}
+            onPressedChange={setTrailEffect}
+            aria-label="Toggle trail effect"
+            variant="outline"
+          >
+            Trail Effect
+          </Toggle>
+
+          <Toggle
+            pressed={smoothScroll}
+            onPressedChange={setSmoothScroll}
+            aria-label="Toggle smooth scroll"
+            variant="outline"
+          >
+            Smooth Scroll
+          </Toggle>
         </div>
 
         {/* Instructions */}
@@ -771,10 +907,7 @@ export default function GameOfLife() {
             <strong>How to Play:</strong>
           </p>
           <ul className="list-disc list-inside">
-            <li>
-              Click on cells to toggle them alive/dead when simulation is
-              stopped
-            </li>
+            <li>Click and drag to draw patterns when simulation is stopped</li>
             <li>Press "Start" to begin the simulation, "Stop" to pause it</li>
             <li>"Step" advances one generation at a time</li>
             <li>"Random" creates a random pattern, "Clear" resets the grid</li>
