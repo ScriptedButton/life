@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Card } from "./ui/card";
@@ -153,6 +153,7 @@ const FALLBACK_PATTERNS = [
         false,
         false,
         false,
+        false,
       ],
       [
         false,
@@ -325,8 +326,8 @@ const FALLBACK_PATTERNS = [
         false,
         false,
         false,
-        true,
         false,
+        true,
         false,
         false,
         false,
@@ -763,7 +764,6 @@ export function PatternAssistant({ onPatternSelect }: PatternAssistantProps) {
             );
             addLog(`📦 ${report.text} (${Math.round(report.progress * 100)}%)`);
           },
-          // Include model_list as any to avoid type error
         }
       );
 
@@ -784,7 +784,7 @@ export function PatternAssistant({ onPatternSelect }: PatternAssistantProps) {
     } finally {
       setInitializing(false);
     }
-  }, [llmEngine, addLog, clearLogs]);
+  }, [llmEngine, addLog, clearLogs, initializing]);
 
   // Generate a pattern using AI with streaming
   const generatePatternWithAI = useCallback(async () => {
@@ -845,26 +845,22 @@ Description: A glider pattern that moves diagonally across the grid.`;
               { role: "user", content: prompt },
             ],
             temperature: 0.7,
-            repetition_penalty: 1.3,
+            frequency_penalty: 0.5,
+            presence_penalty: 0.5,
             stream: true,
-          } as any);
+          });
 
           let fullResponse = "";
 
           // Process streaming response
-          for await (const chunk of response as any) {
-            const newContent = chunk.choices?.[0]?.delta?.content || "";
-            fullResponse += newContent;
+          for await (const chunk of response) {
+            // Safe type check for chunk structure
+            if (chunk && typeof chunk === "object" && "choices" in chunk) {
+              const newContent = chunk.choices?.[0]?.delta?.content || "";
+              fullResponse += newContent;
 
-            // Update UI with streamed content
-            setStreamedResponse(fullResponse);
-
-            if (newContent && newContent.trim()) {
-              if (newContent.length < 50) {
-                addLog(`📥 Streaming: ${newContent}`);
-              } else if (fullResponse.length % 100 < 20) {
-                addLog(`📥 Streaming... (${fullResponse.length} chars so far)`);
-              }
+              // Update UI with streamed content
+              setStreamedResponse(fullResponse);
             }
           }
 
@@ -1079,12 +1075,12 @@ Description: A glider pattern that moves diagonally across the grid.`;
           </div>
           {!hasLiveCells && (
             <p className="text-xs text-amber-600 mt-1">
-              No live cells detected yet. Waiting for X's to appear...
+              No live cells detected yet. Waiting for X&apos;s to appear...
             </p>
           )}
         </div>
       );
-    } catch (err) {
+    } catch {
       return (
         <div className="mt-2 mb-2">
           <p className="text-xs font-medium">Streaming output:</p>

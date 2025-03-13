@@ -20,7 +20,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { ZoomIn, ZoomOut, MinusCircle, PlusCircle } from "lucide-react";
+import { ZoomIn, ZoomOut } from "lucide-react";
 import { PatternAssistant } from "./pattern-assistant";
 
 // Base cell size in pixels
@@ -149,7 +149,6 @@ export default function GameOfLife() {
   const gridRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [viewportOffsets, setViewportOffsets] = useState({ top: 0, left: 0 });
 
   // Zoom functionality
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -679,7 +678,9 @@ export default function GameOfLife() {
   return (
     <Card className="w-full max-w-full overflow-hidden">
       <CardHeader className="pb-2">
-        <CardTitle className="text-center">Conway's Game of Life</CardTitle>
+        <CardTitle className="text-center">
+          Conway&apos;s Game of Life
+        </CardTitle>
         <CardDescription className="text-center">
           A cellular automaton devised by mathematician John Conway
         </CardDescription>
@@ -721,7 +722,7 @@ export default function GameOfLife() {
 
         {/* Pattern Assistant */}
         <PatternAssistant
-          onPatternSelect={({ pattern, description }) => {
+          onPatternSelect={({ pattern }) => {
             // Place the pattern in the center of the visible grid
             const rowStart =
               Math.floor(dimensions.rows / 2) - Math.floor(pattern.length / 2);
@@ -908,11 +909,18 @@ export default function GameOfLife() {
           </p>
           <ul className="list-disc list-inside">
             <li>Click and drag to draw patterns when simulation is stopped</li>
-            <li>Press "Start" to begin the simulation, "Stop" to pause it</li>
-            <li>"Step" advances one generation at a time</li>
-            <li>"Random" creates a random pattern, "Clear" resets the grid</li>
             <li>
-              "Patterns" menu lets you select common Game of Life patterns
+              Press &quot;Start&quot; to begin the simulation, &quot;Stop&quot;
+              to pause it
+            </li>
+            <li>&quot;Step&quot; advances one generation at a time</li>
+            <li>
+              &quot;Random&quot; creates a random pattern, &quot;Clear&quot;
+              resets the grid
+            </li>
+            <li>
+              &quot;Patterns&quot; menu lets you select common Game of Life
+              patterns
             </li>
             <li>
               Use Ctrl+Scroll or the zoom buttons to zoom in/out of the grid
