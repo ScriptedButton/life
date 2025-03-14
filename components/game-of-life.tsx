@@ -148,6 +148,7 @@ export default function GameOfLife() {
   // Scrolling and viewport
   const gridRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
   // Zoom functionality
@@ -185,6 +186,173 @@ export default function GameOfLife() {
   useEffect(() => {
     setCellSize(BASE_CELL_SIZE * zoomLevel);
   }, [zoomLevel]);
+
+  // Draw the grid on canvas
+  const drawGrid = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Check if grid is initialized properly
+    if (!grid || grid.length === 0) return;
+
+    // Get the device pixel ratio for high-DPI displays
+    const dpr = window.devicePixelRatio || 1;
+
+    // Get the display size of the canvas
+    const displayWidth = dimensions.cols * cellSize;
+    const displayHeight = dimensions.rows * cellSize;
+
+    // Set the canvas size with pixel ratio adjustment
+    canvas.width = displayWidth * dpr;
+    canvas.height = displayHeight * dpr;
+
+    // Set the CSS size
+    canvas.style.width = `${displayWidth}px`;
+    canvas.style.height = `${displayHeight}px`;
+
+    // Scale the context
+    ctx.scale(dpr, dpr);
+
+    // Clear canvas
+    ctx.clearRect(0, 0, displayWidth, displayHeight);
+
+    // Draw background
+    ctx.fillStyle =
+      getComputedStyle(document.documentElement)
+        .getPropertyValue("--background")
+        .trim() || "#ffffff";
+    ctx.fillRect(0, 0, displayWidth, displayHeight);
+
+    // Draw grid lines if grid is enabled
+    if (showGrid) {
+      // Adjust line width based on zoom level for better visibility
+      const lineWidth = zoomLevel < 0.75 ? 0.5 : 1;
+      ctx.strokeStyle =
+        getComputedStyle(document.documentElement)
+          .getPropertyValue("--border")
+          .trim() || "#e5e7eb";
+      ctx.lineWidth = lineWidth;
+
+      // Only draw grid lines if cell size is large enough to show them clearly
+      // This prevents the grid from becoming a solid blob at very low zoom levels
+      if (cellSize >= 3) {
+        // Draw vertical lines
+        for (let i = 0; i <= dimensions.cols; i++) {
+          const x = i * cellSize;
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, displayHeight);
+          ctx.stroke();
+        }
+
+        // Draw horizontal lines
+        for (let i = 0; i <= dimensions.rows; i++) {
+          const y = i * cellSize;
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(displayWidth, y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Draw cells
+    const primaryColor =
+      getComputedStyle(document.documentElement)
+        .getPropertyValue("--primary")
+        .trim() || "#3b82f6";
+    ctx.fillStyle = primaryColor;
+
+    // Calculate cell size adjustments based on zoom level
+    let cellOffset = 0;
+    let cellWidth = cellSize;
+    let cellHeight = cellSize;
+
+    if (trailEffect && cellSize > 5) {
+      // Only apply trail effect if cells are large enough
+      cellOffset = cellSize * 0.05;
+      cellWidth = cellSize * 0.95;
+      cellHeight = cellSize * 0.95;
+    } else if (showGrid && cellSize > 3) {
+      // Adjust for grid lines only if we're showing grid and cells are big enough
+      cellWidth = cellSize - 1;
+      cellHeight = cellSize - 1;
+    }
+
+    // Batch drawing of cells for performance
+    for (let rowIndex = 0; rowIndex < dimensions.rows; rowIndex++) {
+      // Safety check for row existence
+      if (!grid[rowIndex]) continue;
+
+      for (let colIndex = 0; colIndex < dimensions.cols; colIndex++) {
+        // Safety check for cell existence
+        if (grid[rowIndex][colIndex]) {
+          const x = colIndex * cellSize + cellOffset;
+          const y = rowIndex * cellSize + cellOffset;
+
+          // If cells are very small, ensure they're at least 1 pixel
+          const finalWidth = Math.max(cellWidth, 1);
+          const finalHeight = Math.max(cellHeight, 1);
+
+          ctx.fillRect(x, y, finalWidth, finalHeight);
+        }
+      }
+    }
+  }, [
+    grid,
+    dimensions.rows,
+    dimensions.cols,
+    cellSize,
+    showGrid,
+    trailEffect,
+    zoomLevel,
+  ]);
+
+  // Update the canvas when relevant states change - avoid using drawGrid in dependencies
+  useEffect(() => {
+    // Use requestAnimationFrame to prevent render loop issues
+    const animationId = requestAnimationFrame(() => {
+      drawGrid();
+    });
+    return () => cancelAnimationFrame(animationId);
+  }, [
+    grid,
+    dimensions.rows,
+    dimensions.cols,
+    cellSize,
+    showGrid,
+    trailEffect,
+    zoomLevel,
+    drawGrid,
+  ]);
+
+  // Initialize grid on mount and when dimensions change
+  useEffect(() => {
+    // Create a temporary grid for initialization
+    const newGrid = Array(dimensions.rows)
+      .fill(null)
+      .map(() => Array(dimensions.cols).fill(false));
+
+    // Set the grid immediately
+    setGrid(newGrid);
+    setGeneration(0);
+
+    // Force a redraw after grid initialization - don't use drawGrid directly in deps
+    const timeout = setTimeout(() => {
+      if (canvasRef.current) {
+        // Use requestAnimationFrame to prevent render loop issues
+        requestAnimationFrame(() => {
+          // Call drawGrid directly to ensure the grid is visible on initial load
+          drawGrid();
+        });
+      }
+    }, 50); // Longer delay to ensure state updates are complete
+
+    return () => clearTimeout(timeout);
+  }, [dimensions, cellSize]);
 
   // Zoom in/out handlers
   const zoomIn = useCallback(() => {
@@ -237,7 +405,8 @@ export default function GameOfLife() {
 
     // Capture current zoom level for calculation
     const currentZoom = zoomLevelRef.current;
-    const newZoom = Math.max(currentZoom - 0.25, 0.5);
+    // Adjust minimum zoom level to 0.6 for better visibility
+    const newZoom = Math.max(currentZoom - 0.25, 0.6);
 
     // Decrease zoom level
     setZoomLevel(newZoom);
@@ -589,11 +758,6 @@ export default function GameOfLife() {
     };
   }, []); // Empty dependency array - this effect should only run once
 
-  // Initialize grid on mount and when dimensions change
-  useEffect(() => {
-    resetGrid();
-  }, [dimensions, resetGrid]);
-
   // Start/stop simulation
   useEffect(() => {
     let timeoutId: NodeJS.Timeout | undefined;
@@ -623,24 +787,61 @@ export default function GameOfLife() {
     [running]
   );
 
-  // Handle mouse events for drag functionality
-  const handleMouseDown = useCallback(
-    (rowIndex: number, colIndex: number) => {
+  // Handle mouse interactions with canvas
+  const getCellCoordinates = useCallback(
+    (clientX: number, clientY: number) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return null;
+
+      const rect = canvas.getBoundingClientRect();
+      const x = clientX - rect.left;
+      const y = clientY - rect.top;
+
+      const colIndex = Math.floor(x / cellSize);
+      const rowIndex = Math.floor(y / cellSize);
+
+      // Ensure coordinates are within bounds
+      if (
+        rowIndex >= 0 &&
+        rowIndex < dimensions.rows &&
+        colIndex >= 0 &&
+        colIndex < dimensions.cols
+      ) {
+        return { rowIndex, colIndex };
+      }
+
+      return null;
+    },
+    [cellSize, dimensions.rows, dimensions.cols]
+  );
+
+  const handleCanvasMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
       if (running) return;
+
+      const coords = getCellCoordinates(e.clientX, e.clientY);
+      if (!coords) return;
+
+      const { rowIndex, colIndex } = coords;
       setIsDragging(true);
       const newValue = !grid[rowIndex][colIndex];
       setDragValue(newValue);
       toggleCell(rowIndex, colIndex);
     },
-    [running, grid, toggleCell]
+    [running, grid, getCellCoordinates, toggleCell]
   );
 
-  const handleMouseEnter = useCallback(
-    (rowIndex: number, colIndex: number) => {
+  const handleCanvasMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
       if (!isDragging || dragValue === null || running) return;
+
+      const coords = getCellCoordinates(e.clientX, e.clientY);
+      if (!coords) return;
+
+      const { rowIndex, colIndex } = coords;
       toggleCell(rowIndex, colIndex, dragValue);
     },
-    [isDragging, dragValue, running, toggleCell]
+    [isDragging, dragValue, running, getCellCoordinates, toggleCell]
   );
 
   const handleMouseUp = useCallback(() => {
@@ -694,7 +895,7 @@ export default function GameOfLife() {
             size="icon"
             className="h-8 w-8 rounded-full"
             onClick={zoomOut}
-            disabled={zoomLevel <= 0.5}
+            disabled={zoomLevel <= 0.6}
           >
             <ZoomOut className="h-4 w-4" />
           </Button>
@@ -746,42 +947,21 @@ export default function GameOfLife() {
             ref={gridRef}
             className="border-gray-300 dark:border-gray-700 rounded-md"
             style={{
-              display: "grid",
-              gridTemplateColumns: `repeat(${dimensions.cols}, ${cellSize}px)`,
               width: `${dimensions.cols * cellSize}px`,
               height: `${dimensions.rows * cellSize}px`,
+              position: "relative",
             }}
           >
-            {grid.map((row, rowIndex) =>
-              row.map((cell, colIndex) => (
-                <div
-                  key={`${rowIndex}-${colIndex}`}
-                  onMouseDown={() => handleMouseDown(rowIndex, colIndex)}
-                  onMouseEnter={() => handleMouseEnter(rowIndex, colIndex)}
-                  className={`
-                    ${cell ? "bg-primary" : "bg-background"} 
-                    ${
-                      showGrid
-                        ? "border border-gray-200 dark:border-gray-800"
-                        : ""
-                    }
-                    ${
-                      trailEffect
-                        ? "transition-all duration-200"
-                        : "transition-colors duration-100"
-                    }
-                    cursor-pointer
-                    select-none
-                    hover:opacity-80
-                  `}
-                  style={{
-                    width: cellSize,
-                    height: cellSize,
-                    transform: cell && trailEffect ? "scale(1.05)" : "scale(1)",
-                  }}
-                />
-              ))
-            )}
+            <canvas
+              ref={canvasRef}
+              width={dimensions.cols * cellSize}
+              height={dimensions.rows * cellSize}
+              onMouseDown={handleCanvasMouseDown}
+              onMouseMove={handleCanvasMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              className="cursor-pointer"
+            />
           </div>
         </div>
 
